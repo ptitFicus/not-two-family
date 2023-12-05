@@ -7,21 +7,10 @@ if (!name) {
   return;
 }
 const dictionnary = loadDictionnary();
+const translations = loadTranslations();
 
 console.log(`Processing ${name}`);
 
-async function fetchIPA(name) {
-  return fetch("https://api2.unalengua.com/ipav3", {
-    method: "POST",
-    body: JSON.stringify({
-      text: name,
-      lang: "fr-CA",
-      mode: true,
-    }),
-  })
-    .then((resp) => resp.json())
-    .then((resp) => resp.ipa);
-}
 fetchIPA(name).then((ipa) => {
   console.log(`IPA : ${ipa}`);
 
@@ -39,12 +28,47 @@ fetchIPA(name).then((ipa) => {
   if (results.length === 0) {
     console.log("Nothing found, sorry");
   } else {
-    console.log(
-      "Possible results :",
-      results.flatMap((rs) => combine(rs))
-    );
+    const sentences = results.flatMap((rs) => combine(rs));
+    console.log("Possible french results :", sentences);
+
+    const englishResult = sentences.reduce((results, sentence) => {
+      const words = sentence.split(" ");
+      const localResult = [];
+      for (const word of words) {
+        const translation = translations.get(word.toLocaleUpperCase("fr-FR"));
+        if (translation) {
+          localResult.push(translation.english);
+        } else {
+          return results;
+        }
+      }
+      const combined = combine(localResult, " ");
+
+      console.log(
+        `Possible translations for "${sentence}" are \n  * ${combined.join(
+          "\n  * "
+        )}`
+      );
+      results.push(combined);
+      return results;
+    }, []);
+
+    console.log("Results are ", englishResult.flat());
   }
 });
+
+async function fetchIPA(name) {
+  return fetch("https://api2.unalengua.com/ipav3", {
+    method: "POST",
+    body: JSON.stringify({
+      text: name,
+      lang: "fr-CA",
+      mode: true,
+    }),
+  })
+    .then((resp) => resp.json())
+    .then((resp) => resp.ipa);
+}
 
 function findOptions(dictionnary, ipas) {
   const result = [];
@@ -116,4 +140,16 @@ function combine([head, ...[headTail, ...tailTail]], separator = " ") {
   }, []);
 
   return combine([combined, ...tailTail]);
+}
+
+function loadTranslations() {
+  console.log("Loading translations...");
+  const data = fs.readFileSync("./translations.json", "utf8");
+  const json = JSON.parse(data);
+  console.log(`Loaded ${json.length} translation entries`);
+
+  return json.reduce((acc, { french, english, type }) => {
+    acc.set(french.toLocaleUpperCase("fr-FR"), { english, type });
+    return acc;
+  }, new Map());
 }
