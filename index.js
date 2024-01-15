@@ -1,54 +1,17 @@
 const http = require('http');
 const url = require('url')
 const fs = require("fs");
+const jwt = require('jsonwebtoken');
+const Fastify = require('fastify');
+const fastify = Fastify({
+  logger: true
+})
 
 const port = process.env.PORT || 3000;
-// const name = process.argv?.[2];
 
 const deeplKey = process.env.DEEPL_APIKEY || 'secret'
 
-// if (!name) {
-//   console.error("Usage : node index.js <name-to-process>");
-//   return;
-// }
 const dictionnary = loadDictionnary();
-const translations = loadTranslations();
-
-// console.log(`Processing ${name}`);
-
-
-
-//   if (results.length === 0) {
-//     console.log("Nothing found, sorry");
-//   } else {
-//     const sentences = results.flatMap((rs) => combine(rs));
-//     console.log("Possible french results :", sentences);
-
-//     const englishResult = sentences.reduce((results, sentence) => {
-//       const words = sentence.split(" ");
-//       const localResult = [];
-//       for (const word of words) {
-//         const translation = translations.get(word.toLocaleUpperCase("fr-FR"));
-//         if (translation) {
-//           localResult.push(translation.english);
-//         } else {
-//           return results;
-//         }
-//       }
-//       const combined = combine(localResult, " ");
-
-//       console.log(
-//         `Possible translations for "${sentence}" are \n  * ${combined.join(
-//           "\n  * "
-//         )}`
-//       );
-//       results.push(combined);
-//       return results;
-//     }, []);
-
-//     console.log("Results are ", englishResult.flat());
-//   }
-// });
 
 async function fetchIPA(name) {
   console.log({ name })
@@ -136,18 +99,6 @@ function combine([head, ...[headTail, ...tailTail]], separator = " ") {
   return combine([combined, ...tailTail]);
 }
 
-function loadTranslations() {
-  console.log("Loading translations...");
-  const data = fs.readFileSync("./translations.json", "utf8");
-  const json = JSON.parse(data);
-  console.log(`Loaded ${json.length} translation entries`);
-
-  return json.reduce((acc, { french, english, type }) => {
-    acc.set(french.toLocaleUpperCase("fr-FR"), { english, type });
-    return acc;
-  }, new Map());
-}
-
 function frenchToEnglish(text) {
   return fetch("https://api-free.deepl.com/v2/translate", {
     method: "POST",
@@ -168,28 +119,9 @@ function frenchToEnglish(text) {
     })
 }
 
-function getBody(request) {
-  return new Promise((resolve) => {
-    const bodyParts = [];
-    let body;
-    request.on('data', (chunk) => {
-      bodyParts.push(chunk);
-    }).on('end', () => {
-      body = Buffer.concat(bodyParts).toString();
-      resolve(body)
-    });
-  });
-}
-
 const translationHandler = (request, response) => {
-
-  getBody(request)
-    .then(body => {
-      console.log({ body })
-      const { text } = JSON.parse(body)
-      return text
-    })
-    .then(fetchIPA)
+  const { text } = request.body
+  fetchIPA(text)
     .then((ipa) => {
       console.log(`IPA : ${ipa}`);
 
@@ -229,37 +161,66 @@ const translationHandler = (request, response) => {
     .then(results => {
       if (results.length === 0) {
         console.log("Nothing found, sorry");
-        response.writeHead(404, { 'Content-Type': 'application/json' });
-        response.write(JSON.stringify({ error: 'nothing found, sorry' }));
-        response.end();
+        response
+          .code(404)
+          .header('Content-Type', 'application/json')
+          .send({ error: 'nothing found, sorry' });
       } else {
         console.log(results)
-        response.writeHead(200, { 'Content-Type': 'application/json' });
-        response.write(JSON.stringify(results));
-        response.end();
+        response
+
+          .send(results);
       }
     })
 };
 
-const routes = {
-  '/translate': translationHandler,
+
+// ▂▃▅▇█▓▒░ Otoroshi exchange protocol ░▒▓█▇▅▃▂
+// const VERY_SECRET_PASSWORD = 'secret';
+
+// function signToken(decodedState, _, res, next) {
+//   const now = Math.floor(Date.now() / 1000)
+
+//   const token = {
+//     'state-resp': decodedState.state,
+//     iat: now,
+//     nbf: now,
+//     exp: now + 10,
+//     aud: 'Otoroshi'
+//   };
+
+//   res.header("Otoroshi-State-Resp", jwt.sign(token, VERY_SECRET_PASSWORD, { algorithm: 'HS512' }))
+//   next();
+// }
+
+// function OtoroshiChallengeProtocol(req, res, done) {
+//   const headers = req.headers;
+//   const state = headers["otoroshi-state"];
+
+//   jwt.verify(state, VERY_SECRET_PASSWORD, { issuer: 'Otoroshi' }, (err, decodedState) => {
+//     if (err) {
+//       res
+//         .code(401)
+//         .send({ error: "unauthorized" });
+//     } else {
+//       signToken(decodedState, res, res, done);
+//     }
+//   });
+// }
+
+// ▂▃▅▇█▓▒░   The End    ░▒▓█▇▅▃▂
+
+
+
+
+// fastify.addHook('onRequest', OtoroshiChallengeProtocol);
+
+
+fastify.post("/translate", translationHandler)
+
+try {
+  fastify.listen({ port })
+} catch (err) {
+  fastify.log.error(err)
+  process.exit(1)
 }
-
-const server = http.createServer((request, response) => {
-  const parts = url.parse(request.url);
-  const route = routes[parts.pathname];
-
-  if (route) {
-    route(request, response);
-  } else {
-    response.writeHead(404, { 'Content-Type': 'application/json' });
-    response.write(JSON.stringify({ error: 'Not Found' }));
-    response.end();
-  }
-});
-server.listen(port, (err) => {
-  if (err) {
-    return console.log('something bad happened', err)
-  }
-  console.log(`API is listening on ${port}`)
-});
