@@ -2,6 +2,8 @@ const fs = require("fs");
 
 const name = process.argv?.[2];
 
+const deeplKey = process.env.DEEPL_APIKEY || 'secret'
+
 if (!name) {
   console.error("Usage : node index.js <name-to-process>");
   return;
@@ -11,19 +13,32 @@ const translations = loadTranslations();
 
 console.log(`Processing ${name}`);
 
-fetchIPA(name).then((ipa) => {
-  console.log(`IPA : ${ipa}`);
+async function fetchIPA(name) {
+  return fetch("https://api2.unalengua.com/ipav3", {
+    method: "POST",
+    body: JSON.stringify({
+      text: name,
+      lang: "fr-FR",
+      mode: true,
+    }),
+  })
+    .then((resp) => resp.json())
+    .then((resp) => resp.ipa);
+}
+fetchIPA(name)
+  .then((ipa) => {
+    console.log(`IPA : ${ipa}`);
 
-  const decompositions = subArrayDecomposition(graphemeSplit(cleanIPA(ipa)));
+    const decompositions = subArrayDecomposition(graphemeSplit(cleanIPA(ipa)));
 
-  const results = [];
+    const results = [];
 
-  for (const decomposition of decompositions) {
-    const res = findOptions(dictionnary, decomposition);
-    if (res) {
-      results.push(res);
+    for (const decomposition of decompositions) {
+      const res = findOptions(dictionnary, decomposition);
+      if (res) {
+        results.push(res);
+      }
     }
-  }
 
   if (results.length === 0) {
     console.log("Nothing found, sorry");
@@ -69,6 +84,38 @@ async function fetchIPA(name) {
     .then((resp) => resp.json())
     .then((resp) => resp.ipa);
 }
+    if (results.length === 0) {
+      return []
+    } else {
+      // console.log(
+      //   "Possible results :",
+        return results
+          .filter(array => !array.flat().some(str => str.includes("'")))
+          .map(array => {
+            return array.map(strArray => {
+              return strArray
+                .filter(str => !str.endsWith("s"))
+                .filter(str => !str.endsWith("ent"))
+            })
+          })
+          .flatMap((rs) => combine(rs))
+      // );
+    }
+  })
+  .then(results => {
+    if (results.length === 0) {
+      return []
+    } else {
+      return Promise.all(results.map(frenchToEnglish))
+    }
+  })
+  .then(results => {
+    if (results.length === 0) {
+      console.log("Nothing found, sorry");
+    } else {
+      console.log(results)
+    }
+  });
 
 function findOptions(dictionnary, ipas) {
   const result = [];
@@ -152,4 +199,24 @@ function loadTranslations() {
     acc.set(french.toLocaleUpperCase("fr-FR"), { english, type });
     return acc;
   }, new Map());
+}
+
+function frenchToEnglish(text) {
+  return fetch("https://api-free.deepl.com/v2/translate", {
+    method: "POST",
+    headers: {
+      Authorization: `DeepL-Auth-Key ${deeplKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      text: [text],
+      'target_lang': "EN",
+      'source_lang': "FR"
+    }),
+  })
+  .then(r => r.json())
+  .then(({translations}) => {
+    const [{text}] = translations
+    return text
+  })
 }
