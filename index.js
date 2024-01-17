@@ -12,6 +12,19 @@ const port = process.env.PORT || 3000;
 const deeplKey = process.env.DEEPL_APIKEY || 'secret'
 
 const dictionnary = loadDictionnary();
+const translations = loadTranslations();
+
+function loadTranslations() {
+  console.log("Loading translations...");
+  const data = fs.readFileSync("./translations.json", "utf8");
+  const json = JSON.parse(data);
+  console.log(`Loaded ${json.length} translation entries`);
+
+  return json.reduce((acc, { french, english, type }) => {
+    acc.set(french.toLocaleUpperCase("fr-FR"), { english, type });
+    return acc;
+  }, new Map());
+}
 
 async function fetchIPA(name) {
   console.log({ name })
@@ -99,7 +112,33 @@ function combine([head, ...[headTail, ...tailTail]], separator = " ") {
   return combine([combined, ...tailTail]);
 }
 
-function frenchToEnglish(text) {
+function translate(texts) {
+  const englishResult = texts.reduce((results, sentence) => {
+    const words = sentence.split(" ");
+    const localResult = [];
+    for (const word of words) {
+      const translation = translations.get(word.toLocaleUpperCase("fr-FR"));
+      if (translation) {
+        localResult.push(translation.english);
+      } else {
+        return results;
+      }
+    }
+    const combined = combine(localResult, " ");
+
+    console.log(
+      `Possible translations for "${sentence}" are \n  * ${combined.join(
+        "\n  * "
+      )}`
+    );
+    results.push(combined);
+    return results.flat();
+  }, []);
+
+  return Promise.resolve(englishResult)
+}
+
+function betaTranslate(text, lang = "EN") {
   return fetch("https://api-free.deepl.com/v2/translate", {
     method: "POST",
     headers: {
@@ -108,7 +147,7 @@ function frenchToEnglish(text) {
     },
     body: JSON.stringify({
       text: [text],
-      'target_lang': "EN",
+      'target_lang': lang,
       'source_lang': "FR"
     }),
   })
@@ -121,10 +160,19 @@ function frenchToEnglish(text) {
 
 const translationHandler = (request, response) => {
   const { text } = request.body
-  fetchIPA(text)
-    .then((ipa) => {
-      console.log(`IPA : ${ipa}`);
 
+  Promise.all([
+    fetch('http://izanami.oto.tools/api/v2/features?projects=3c2bf610-7e7a-49fe-9360-86403e3fc351&features=010671d5-2bbb-45aa-a00c-a8a469638c9c&user=fifou', {
+      headers: {
+        "izanami-client-id": 'dtc_D3WqdXbo9pyD5xaP',
+        "izanami-client-secret": 'dtc_nK8RIoHmUUSSxLMAwGVwwxaP95CPjslf02RKnnPXLEwJjoYF69R30YFJXoDrHaTp',
+      }
+    })
+      .then(r => r.json()),
+    fetchIPA(text)
+  ])
+    .then(([{ active }, ipa]) => {
+      console.log(`IPA : ${ipa}`);
       const decompositions = subArrayDecomposition(graphemeSplit(cleanIPA(ipa)));
 
       const results = [];
@@ -137,9 +185,9 @@ const translationHandler = (request, response) => {
       }
 
       if (results.length === 0) {
-        return []
+        return [active, []]
       } else {
-        return results
+        return [active, results
           .filter(array => !array.flat().some(str => str.includes("'")))
           .map(array => {
             return array.map(strArray => {
@@ -148,14 +196,17 @@ const translationHandler = (request, response) => {
                 .filter(str => !str.endsWith("ent"))
             })
           })
-          .flatMap((rs) => combine(rs))
+          .flatMap((rs) => combine(rs))]
       }
     })
-    .then(results => {
+    .then(([betaTranslation, results]) => {
       if (results.length === 0) {
         return []
+      } else if (betaTranslation) {
+        console.log('beta translation activated')
+        return Promise.all(results.map(r => betaTranslate(r, lang)))
       } else {
-        return Promise.all(results.map(frenchToEnglish))
+        return translate(results)
       }
     })
     .then(results => {
@@ -166,9 +217,7 @@ const translationHandler = (request, response) => {
           .header('Content-Type', 'application/json')
           .send({ error: 'nothing found, sorry' });
       } else {
-        console.log(results)
         response
-
           .send(results);
       }
     })
@@ -176,44 +225,44 @@ const translationHandler = (request, response) => {
 
 
 // ▂▃▅▇█▓▒░ Otoroshi exchange protocol ░▒▓█▇▅▃▂
-// const VERY_SECRET_PASSWORD = 'secret';
+const VERY_SECRET_PASSWORD = 'secret';
 
-// function signToken(decodedState, _, res, next) {
-//   const now = Math.floor(Date.now() / 1000)
+function signToken(decodedState, _, res, next) {
+  const now = Math.floor(Date.now() / 1000)
 
-//   const token = {
-//     'state-resp': decodedState.state,
-//     iat: now,
-//     nbf: now,
-//     exp: now + 10,
-//     aud: 'Otoroshi'
-//   };
+  const token = {
+    'state-resp': decodedState.state,
+    iat: now,
+    nbf: now,
+    exp: now + 10,
+    aud: 'Otoroshi'
+  };
 
-//   res.header("Otoroshi-State-Resp", jwt.sign(token, VERY_SECRET_PASSWORD, { algorithm: 'HS512' }))
-//   next();
-// }
+  res.header("Otoroshi-State-Resp", jwt.sign(token, VERY_SECRET_PASSWORD, { algorithm: 'HS512' }))
+  next();
+}
 
-// function OtoroshiChallengeProtocol(req, res, done) {
-//   const headers = req.headers;
-//   const state = headers["otoroshi-state"];
+function OtoroshiChallengeProtocol(req, res, done) {
+  const headers = req.headers;
+  const state = headers["otoroshi-state"];
 
-//   jwt.verify(state, VERY_SECRET_PASSWORD, { issuer: 'Otoroshi' }, (err, decodedState) => {
-//     if (err) {
-//       res
-//         .code(401)
-//         .send({ error: "unauthorized" });
-//     } else {
-//       signToken(decodedState, res, res, done);
-//     }
-//   });
-// }
+  jwt.verify(state, VERY_SECRET_PASSWORD, { issuer: 'Otoroshi' }, (err, decodedState) => {
+    if (err) {
+      res
+        .code(401)
+        .send({ error: "unauthorized" });
+    } else {
+      signToken(decodedState, res, res, done);
+    }
+  });
+}
 
 // ▂▃▅▇█▓▒░   The End    ░▒▓█▇▅▃▂
 
 
 
 
-// fastify.addHook('onRequest', OtoroshiChallengeProtocol);
+fastify.addHook('onRequest', OtoroshiChallengeProtocol);
 
 
 fastify.post("/translate", translationHandler)
