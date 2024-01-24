@@ -159,7 +159,7 @@ function translate(texts) {
 // }
 
 const translationHandler = (request, response) => {
-  // const { text, lang } = request.query
+  const { text, lang } = request.query
 
   // const headers = request.headers;
   // const claim = headers["otoroshi-claim"];
