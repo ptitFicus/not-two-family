@@ -159,13 +159,16 @@ function translate(texts) {
 // }
 
 const translationHandler = (request, response) => {
-  const { text, lang } = request.body
+  // const { text, lang } = request.query
 
   // const headers = request.headers;
   // const claim = headers["otoroshi-claim"];
 
   // const decodedClaim = jwt.verify(claim, VERY_SECRET_PASSWORD, { issuer: 'Otoroshi' })
+
+  // const {metadata} = decodedClaim.apikey;
   // const { izanamiUser } = decodedClaim.apikey.metadata;
+  // console.log({ decodedClaim, metadata, izanamiUser })
 
   return Promise.all([
     // fetch(`http://izanami.oto.tools/api/v2/features?projects=3c2bf610-7e7a-49fe-9360-86403e3fc351&features=${izanamiNewTranslationFeature}&user=${izanamiUser}`, {
@@ -274,7 +277,7 @@ const translationHandler = (request, response) => {
 // fastify.addHook('onRequest', OtoroshiChallengeProtocol);
 
 
-fastify.post("/translate", translationHandler)
+fastify.get("/translate", translationHandler)
 
 try {
   fastify.listen({ port })
